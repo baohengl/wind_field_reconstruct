@@ -2,6 +2,7 @@ import os
 import shutil
 import subprocess
 import argparse
+import shlex
 
 
 def run_single_case(case_num: int, source_folder: str, base_path: str,
@@ -28,7 +29,12 @@ def run_single_case(case_num: int, source_folder: str, base_path: str,
     for folder in os.listdir(case_path):
         folder_path = os.path.join(case_path, folder)
         if os.path.isdir(folder_path) and folder not in keep_folders:
-            shutil.rmtree(folder_path)
+            command = (
+                f"find {shlex.quote(folder_path)} -mindepth 1 -print0 | "
+                f"xargs -0 -P{os.cpu_count() or 1} rm -rf && "
+                f"rmdir {shlex.quote(folder_path)}"
+            )
+            subprocess.run(["bash", "-c", command], check=True)
 
 
 def main() -> None:
