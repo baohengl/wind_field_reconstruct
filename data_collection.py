@@ -5,9 +5,38 @@ import meshio
 import numpy as np
 import argparse
 from collections import defaultdict
+from concurrent.futures import ProcessPoolExecutor
 
 
-def collect_case(case_dir: str, output_h5: str) -> None:
+def _read_vtk(pf: str) -> tuple[np.ndarray, np.ndarray]:
+    """Read a single VTK file and return cell centers and velocity.
+
+    Parameters
+    ----------
+    pf: str
+        Path to the VTK part file.
+
+    Returns
+    -------
+    tuple[np.ndarray, np.ndarray]
+        Arrays of cell centers and velocity data.
+    """
+    mesh = meshio.read(pf)
+    if "U" not in mesh.cell_data:
+        raise KeyError(f"文件 {pf} 中未找到 Cell Data 'U'")
+
+    points = mesh.points.astype(np.float32, copy=False)
+
+    coords = []
+    velocity = []
+    for cb, v in zip(mesh.cells, mesh.cell_data["U"]):
+        coords.append(points[cb.data].mean(axis=1))
+        velocity.append(np.asarray(v, dtype=np.float32))
+
+    return np.concatenate(coords, axis=0), np.concatenate(velocity, axis=0)
+
+
+def collect_case(case_dir: str, output_h5: str, num_workers: int | None = None) -> None:
     """Collect VTK data from an OpenFOAM case and append to an HDF5 file.
 
     Parameters
@@ -16,6 +45,9 @@ def collect_case(case_dir: str, output_h5: str) -> None:
         Path to the case directory containing processor* folders.
     output_h5: str
         Path to the aggregated HDF5 file where results are stored.
+    num_workers: int | None, optional
+        Number of parallel workers used to read VTK files. ``None`` uses
+        all available CPUs.
     """
     case_name = os.path.basename(case_dir)
 
@@ -41,23 +73,15 @@ def collect_case(case_dir: str, output_h5: str) -> None:
             print(f"▶ 正在处理 {case_name} 时间步 {t} ...")
             part_files = files_by_time[t]
 
-            all_coords = []
-            all_velocity = []
+            workers = num_workers or os.cpu_count() or 1
 
-            for pf in part_files:
-                mesh = meshio.read(pf)
-                if "U" not in mesh.cell_data:
-                    raise KeyError(f"文件 {pf} 中未找到 Cell Data 'U'")
-                points = np.array(mesh.points, dtype=np.float32)
+            if workers == 1:
+                results = [_read_vtk(pf) for pf in part_files]
+            else:
+                with ProcessPoolExecutor(max_workers=min(workers, len(part_files))) as ex:
+                    results = list(ex.map(_read_vtk, part_files))
 
-                for i, cell_block in enumerate(mesh.cells):
-                    cells = np.array(cell_block.data)
-                    velocity_block = np.array(mesh.cell_data["U"][i], dtype=np.float32)
-                    cell_centers = points[cells].mean(axis=1)
-
-                    all_coords.append(cell_centers)
-                    all_velocity.append(velocity_block)
-
+            all_coords, all_velocity = zip(*results)
             all_coords = np.vstack(all_coords)
             all_velocity = np.vstack(all_velocity)
 
@@ -76,9 +100,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Collect wind field data from a case directory.")
     parser.add_argument("case_dir", help="Path to case directory")
     parser.add_argument("output_h5", help="Output HDF5 file")
+    parser.add_argument("-j", "--workers", type=int, default=None, help="Number of parallel workers")
     args = parser.parse_args()
 
-    collect_case(args.case_dir, args.output_h5)
+    collect_case(args.case_dir, args.output_h5, args.workers)
 
 
 if __name__ == "__main__":
