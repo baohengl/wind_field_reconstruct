@@ -131,6 +131,13 @@ def plot_slice(
         f"Case {case_name} | z = {z_target} | t = {t_target} | w 高程图"
     )
     plt.axis("equal")
+
+    import os
+
+    output_dir = "/vscratch/grp-tengwu/baohengl_0228/reconstruct_wind_field/CFD_data"
+    os.makedirs(output_dir, exist_ok=True)
+    filename = f"case_{case_name}_z_{z_target}_t_{t_target}.png"
+    plt.savefig(os.path.join(output_dir, filename))
     plt.show()
 
 
@@ -138,7 +145,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Inspect wind field HDF5 data")
     parser.add_argument(
         "--file-path",
-        default="vscratch/grp-tengwu/baohengl_0228/reconstruct_wind_field/CFD_data/windfield_all_cases.h5",
+        default="/vscratch/grp-tengwu/baohengl_0228/reconstruct_wind_field/CFD_data/windfield_all_cases.h5",
         help="Path to the HDF5 file",
     )
     parser.add_argument(
