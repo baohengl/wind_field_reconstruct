@@ -82,11 +82,13 @@ def collect_case(case_dir: str, output_h5: str, num_workers: int | None = None) 
                     results = list(ex.map(_read_vtk, part_files))
 
             all_coords, all_velocity = zip(*results)
-            all_coords = np.vstack(all_coords)
-            all_velocity = np.vstack(all_velocity)
+            all_coords = np.vstack(all_coords).astype(np.float16)
+            all_velocity = np.vstack(all_velocity).astype(np.float16)
+
+            if "coords" not in case_grp:
+                case_grp.create_dataset("coords", data=all_coords, compression="gzip")
 
             grp_t = case_grp.create_group(t)
-            grp_t.create_dataset("coords", data=all_coords, compression="gzip")
             grp_t.create_dataset("velocity", data=all_velocity, compression="gzip")
 
             time_list.append(float(t))
