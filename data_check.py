@@ -47,13 +47,17 @@ def inspect_file(file_path: str, t_str: str = "0.005") -> None:
             # Only display the first few time steps for brevity
             print("时间步：", case_grp["time"][:10], "...")
 
+            print(
+                "坐标 dtype:",
+                case_grp["coords"].dtype,
+                "shape:",
+                case_grp["coords"].shape,
+            )
+
             if t_str in case_grp:
-                print(f"\n{case} -> t = {t_str} 的数据：", list(case_grp[t_str].keys()))
                 print(
-                    "  coords shape:",
-                    case_grp[t_str]["coords"].shape,
-                    "dtype:",
-                    case_grp[t_str]["coords"].dtype,
+                    f"\n{case} -> t = {t_str} 的数据：",
+                    list(case_grp[t_str].keys()),
                 )
                 print(
                     "  velocity shape:",
@@ -101,7 +105,7 @@ def plot_slice(
         if t_target not in case_grp:
             raise KeyError(f"❌ Case {case_name} 中不存在时间步: {t_target}")
 
-        coords = case_grp[t_target]["coords"][:]
+        coords = case_grp["coords"][:]
         velocity = case_grp[t_target]["velocity"][:]
 
     mask = np.abs(coords[:, 2] - z_target) < tol
