@@ -15,6 +15,8 @@ information.
 from __future__ import annotations
 
 import argparse
+import glob
+import os
 
 
 def inspect_file(file_path: str, t_str: str = "0.005") -> None:
@@ -67,6 +69,42 @@ def inspect_file(file_path: str, t_str: str = "0.005") -> None:
                 )
             else:
                 print(f"⚠️ {case} 中没有时间步 {t_str}")
+
+
+def inspect_files(file_paths: list[str], t_str: str = "0.005") -> None:
+    """Inspect multiple HDF5 files sequentially.
+
+    Parameters
+    ----------
+    file_paths:
+        List of paths to HDF5 files.
+    t_str:
+        Time step to probe for each case.
+    """
+
+    for fp in file_paths:
+        print(f"\n##### 文件: {fp} #####")
+        inspect_file(fp, t_str=t_str)
+
+
+def find_case_file(file_paths: list[str], case_name: str) -> str | None:
+    """Return the path of the file containing ``case_name``.
+
+    Parameters
+    ----------
+    file_paths:
+        List of HDF5 file paths to search.
+    case_name:
+        Target case name to look for.
+    """
+
+    import h5py
+
+    for fp in file_paths:
+        with h5py.File(fp, "r") as f:
+            if case_name in f:
+                return fp
+    return None
 
 
 def plot_slice(
@@ -150,7 +188,16 @@ def main() -> None:
     parser.add_argument(
         "--file-path",
         default="/vscratch/grp-tengwu/baohengl_0228/reconstruct_wind_field/CFD_data/windfield_all_cases.h5",
-        help="Path to the HDF5 file",
+        help="Path to a single HDF5 file",
+    )
+    parser.add_argument(
+        "--dir",
+        help="Directory containing multiple windfield_all_cases*.h5 files",
+    )
+    parser.add_argument(
+        "--pattern",
+        default="windfield_all_cases*.h5",
+        help="Glob pattern used with --dir (default: windfield_all_cases*.h5)",
     )
     parser.add_argument(
         "--case-name",
@@ -186,15 +233,36 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    inspect_file(args.file_path, t_str=args.time)
-    if args.plot:
-        plot_slice(
-            args.file_path,
-            args.case_name,
-            t_target=args.t_target,
-            z_target=args.z_target,
-            tol=args.tol,
-        )
+    if args.dir:
+        files = sorted(glob.glob(os.path.join(args.dir, args.pattern)))
+        if not files:
+            raise FileNotFoundError(
+                f"No files matching {args.pattern} found in {args.dir}"
+            )
+        inspect_files(files, t_str=args.time)
+        if args.plot:
+            case_file = find_case_file(files, args.case_name)
+            if case_file is None:
+                raise KeyError(
+                    f"Case {args.case_name} not found in provided HDF5 files"
+                )
+            plot_slice(
+                case_file,
+                args.case_name,
+                t_target=args.t_target,
+                z_target=args.z_target,
+                tol=args.tol,
+            )
+    else:
+        inspect_file(args.file_path, t_str=args.time)
+        if args.plot:
+            plot_slice(
+                args.file_path,
+                args.case_name,
+                t_target=args.t_target,
+                z_target=args.z_target,
+                tol=args.tol,
+            )
 
 
 if __name__ == "__main__":
