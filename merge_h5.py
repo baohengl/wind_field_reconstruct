@@ -5,7 +5,8 @@ Merge HDF5 windfield (from your collector), resample per-z onto uniform x–y gr
 zero section edges, and interpolate probe time series. Outputs in float16.
 
 Each case can be processed in parallel (per-process) and finally written into a
-single output HDF5. Use ``--workers`` to control the degree of parallelism.
+single output HDF5. Use ``--workers`` to control the degree of parallelism. Use
+``--progress`` to display tqdm progress bars.
 
 INPUT FORMAT (per case group, e.g. "/0"):
   /<case>/coords           (N, 3) float16   # cell centers (x,y,z), same for all timesteps
@@ -37,6 +38,7 @@ from typing import Tuple, Optional, List
 
 import h5py
 import numpy as np
+from tqdm.auto import tqdm
 
 # ---------- Configs ----------
 # Section grid
@@ -177,6 +179,7 @@ def process_case(
     probe_y_list: Optional[List[float]] = None,
     idw_k: int = 16,
     idw_power: float = 2.0,
+    progress: bool = False,
 ):
     """Load a single case from ``fpath`` and return interpolated arrays.
 
@@ -219,6 +222,8 @@ def process_case(
         z_to_xy = [coords[idx, :2].astype(np.float32, copy=False) for idx in z_to_idx]
 
         # stream timesteps in chunks to avoid loading all (T,N,3) at once
+        if progress:
+            pbar = tqdm(total=T, desc=case_name, position=0, leave=True)
         for t0 in range(0, T, time_chunk):
             t1 = min(T, t0 + time_chunk)
             tc = t1 - t0
@@ -255,6 +260,11 @@ def process_case(
 
             section_all[t0:t1, ...] = buf_sec.astype(OUT_DTYPE, copy=False)
             probes_all[t0:t1, ...] = buf_prb.astype(OUT_DTYPE, copy=False)
+            if progress:
+                pbar.update(tc)
+
+        if progress:
+            pbar.close()
 
     return section_all, z_vals, probes_all, time
 
@@ -270,6 +280,7 @@ def merge_all(
     idw_k: int = 16,
     idw_power: float = 2.0,
     workers: Optional[int] = None,
+    progress: bool = False,
 ):
     if input_files:
         files = [f if os.path.isabs(f) else os.path.join(input_dir, f) for f in input_files]
@@ -322,10 +333,13 @@ def merge_all(
                     probe_y_list,
                     idw_k,
                     idw_power,
+                    progress,
                 )
                 future_map[fut] = case_id
-
-            for fut in as_completed(future_map):
+            futures_iter = as_completed(future_map)
+            if progress:
+                futures_iter = tqdm(futures_iter, total=len(tasks), position=0, leave=True, desc="cases")
+            for fut in futures_iter:
                 case_id = future_map[fut]
                 section, z_vals, probes, time_arr = fut.result()
 
@@ -392,7 +406,10 @@ def merge_all(
 # ---------- CLI ----------
 def main() -> None:
     p = argparse.ArgumentParser(
-        description="Merge & resample windfield (your collector schema) onto uniform x–y grid per z; add probes; float16 outputs."
+        description=(
+            "Merge & resample windfield (your collector schema) onto uniform x–y grid per z; "
+            "add probes; float16 outputs. Use --progress to show progress bars."
+        )
     )
     p.add_argument("input_dir", help="Directory containing windfield_all_cases*.h5")
     p.add_argument("output_file", nargs="?", default=None, help="Output HDF5 (default: <input_dir>/dataset_merged_resampled_fp16.h5)")
@@ -409,6 +426,7 @@ def main() -> None:
     p.add_argument("--idw-k", type=int, default=16, help="IDW neighbors (fallback only)")
     p.add_argument("--idw-power", type=float, default=2.0, help="IDW power (fallback only)")
     p.add_argument("--workers", type=int, default=None, help="Worker processes for parallel cases (default: CPU count)")
+    p.add_argument("--progress", action="store_true", help="Show tqdm progress bars")
     args = p.parse_args()
 
     probe_y_list = [float(tok.strip()) for tok in args.probe_y.split(",") if tok.strip()]
@@ -424,6 +442,7 @@ def main() -> None:
         idw_k=args.idw_k,
         idw_power=args.idw_power,
         workers=args.workers,
+        progress=args.progress,
     )
 
 if __name__ == "__main__":
