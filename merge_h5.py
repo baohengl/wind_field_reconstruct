@@ -263,6 +263,7 @@ def merge_all(
     input_dir: str,
     output_file: str | None,
     pattern: str = "windfield_all_cases*.h5",
+    input_files: Optional[List[str]] = None,
     time_chunk: int = 8,
     probe_x: float = PROBE_X_DEFAULT,
     probe_y_list: Optional[List[float]] = None,
@@ -270,9 +271,14 @@ def merge_all(
     idw_power: float = 2.0,
     workers: Optional[int] = None,
 ):
-    files = sorted(glob.glob(os.path.join(input_dir, pattern)))
+    if input_files:
+        files = [f if os.path.isabs(f) else os.path.join(input_dir, f) for f in input_files]
+    else:
+        files = sorted(glob.glob(os.path.join(input_dir, pattern)))
     if not files:
-        raise FileNotFoundError(f"No files matching pattern '{pattern}' in {input_dir}")
+        raise FileNotFoundError(
+            f"No files provided" if input_files else f"No files matching pattern '{pattern}' in {input_dir}"
+        )
 
     if not output_file:
         output_file = os.path.join(input_dir, "dataset_merged_resampled_fp16.h5")
@@ -391,6 +397,12 @@ def main() -> None:
     p.add_argument("input_dir", help="Directory containing windfield_all_cases*.h5")
     p.add_argument("output_file", nargs="?", default=None, help="Output HDF5 (default: <input_dir>/dataset_merged_resampled_fp16.h5)")
     p.add_argument("--pattern", default="windfield_all_cases*.h5", help="Glob pattern for inputs")
+    p.add_argument(
+        "--input-files",
+        nargs="+",
+        default=None,
+        help="Explicit HDF5 files to process (overrides --pattern)",
+    )
     p.add_argument("--time-chunk", type=int, default=8, help="Streaming chunk over timesteps")
     p.add_argument("--probe-x", type=float, default=PROBE_X_DEFAULT, help="Probe x (default 0.5)")
     p.add_argument("--probe-y", type=str, default=",".join(str(v) for v in PROBE_Y_DEFAULT), help="Comma-separated probe y list")
@@ -405,6 +417,7 @@ def main() -> None:
         input_dir=args.input_dir,
         output_file=args.output_file,
         pattern=args.pattern,
+        input_files=args.input_files,
         time_chunk=args.time_chunk,
         probe_x=args.probe_x,
         probe_y_list=probe_y_list,
