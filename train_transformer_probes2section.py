@@ -255,7 +255,12 @@ def parse_args():
     p.add_argument("--bf16", action="store_true", help="use bfloat16 in autocast (H100 recommended)")
     p.add_argument("--compile", action="store_true", help="torch.compile the model")
     p.add_argument("--cudnn-benchmark", action="store_true", help="speed over strict determinism")
-    p.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
+
+    # device & GPU selection
+    p.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu",
+                   help="device string, e.g., 'cuda', 'cuda:0', 'cpu'")
+    p.add_argument("--gpu", type=int, default=-1,
+                   help="choose which GPU index to use (e.g., 0/1/2...). If <0, follow --device")
 
     # wandb
     p.add_argument("--wandb", action="store_true", help="enable Weights & Biases logging")
@@ -273,11 +278,40 @@ def maybe_subsample_subset(subset_obj, k:int, seed:int):
     new_idx = [subset_obj.indices[i] for i in pick]
     return Subset(subset_obj.dataset, new_idx)
 
+def resolve_device(args):
+    # If user explicitly chose a GPU index
+    if args.gpu is not None and args.gpu >= 0:
+        if torch.cuda.is_available():
+            n = torch.cuda.device_count()
+            if args.gpu < n:
+                dev = f"cuda:{args.gpu}"
+                print(f"[Device] Using user-specified GPU index: {dev}")
+                return dev
+            else:
+                print(f"[Warning] Requested GPU {args.gpu} not available (only {n} found). "
+                      f"Falling back to cuda:0." if n > 0 else "[Warning] No CUDA device found. Falling back to CPU.")
+                return "cuda:0" if n > 0 else "cpu"
+        else:
+            print("[Warning] CUDA not available. Falling back to CPU.")
+            return "cpu"
+    # Otherwise follow --device
+    dev = args.device
+    if isinstance(dev, str) and dev.startswith("cuda") and not torch.cuda.is_available():
+        print("[Warning] --device set to CUDA but CUDA not available. Falling back to CPU.")
+        dev = "cpu"
+    print(f"[Device] Using {dev}")
+    return dev
+
 def main():
     args=parse_args()
     set_seed(args.seed, strict_det=not args.cudnn_benchmark)
     torch.set_float32_matmul_precision("high")
-    if args.device.startswith("cuda"): enable_flash_attention()
+
+    # resolve device from --gpu / --device
+    args.device = resolve_device(args)
+
+    if str(args.device).startswith("cuda"):
+        enable_flash_attention()
 
     # wandb init
     wb = init_wandb(args, model=None)  # model 未就绪，先让 config 同步
@@ -328,7 +362,7 @@ def main():
         start_epoch,best_val=load_ckpt(args.resume, model, optim, map_location=args.device)
 
     # AMP/bf16
-    amp_on = args.amp and args.device.startswith("cuda")
+    amp_on = args.amp and str(args.device).startswith("cuda")
     amp_dtype = torch.bfloat16 if args.bf16 else torch.float16
     scaler = torch.cuda.amp.GradScaler(enabled=amp_on and (amp_dtype==torch.float16))  # bfloat16 不需要 scaler
 
